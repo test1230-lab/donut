@@ -106,7 +106,6 @@ namespace disp
             SDL_DestroyRenderer(*ppRenderer);
             *ppRenderer = nullptr;
         }
-
         // Free the SDL window
         if (ppWindow)
         {
