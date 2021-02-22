@@ -20,6 +20,11 @@ constexpr float top0 = 0.5f;
 constexpr float near0 = 1.0f;
 constexpr float far0 = 10.0f;
 
+struct pt2d
+{
+    int x, y;
+};
+
 inline float deg2rad(float deg)
 {
 	//magic number is pi/180
@@ -237,7 +242,17 @@ namespace rot
 		return (rot_mat * point);
 	}
 
-	glm::vec3 pt_rot_y(glm::vec3 point, float deg)
+    void change_pt_rot_y(glm::vec3 *point, float deg)
+    {
+        float ry = deg2rad(deg);
+        const glm::mat3x3 rot_mat = { {cos(ry), 0, sin(ry)},
+                                      {0.f, 1.f, 0.f},
+                                      {-sin(ry), 0.f, cos(ry)} };
+
+        *point = rot_mat * *point;
+    }
+
+    glm::vec3 pt_rot_y(glm::vec3 point, float deg)
 	{
 		float ry = deg2rad(deg);
 		const glm::mat3x3 rot_mat = { {cos(ry), 0, sin(ry)},
@@ -302,54 +317,37 @@ namespace rot
 
 inline float pow2(float x)
 {
-	return x * x;
+    return x * x;
 }
 
 inline float pt_dist_3d(glm::vec3 a, glm::vec3 b)
 {
-    return std::powf((pow2(b.x - a.x) + pow2(b.y - a.y) + pow2(b.z - a.z)), 0.5f);
+    return std::pow((pow2(b.x - a.x) + pow2(b.y - a.y) + pow2(b.z - a.z)), 0.5f);
 }
-//vec3 a is light src, b is pt, light_value is strength of src
-inline float light_intensity(float light_value, glm::vec3 a, glm::vec3 b)
+
+
+pt2d weak_proj(glm::vec3 pt, glm::vec3 cam, float k1, float k2)
 {
-    return light_value * (1.f / pow2(pt_dist_3d(a, b)));
+    float u = k2 + pt_dist_3d(pt, cam);
+    int a = round((k1 * pt.x) / u) + (screen_w / 2) - 40 ;
+    int b = round((k1 * pt.y) / u) + (screen_h / 2) - 40;
+    //printf("x:%d y:%d\n", a, b);
+    return { std::clamp(a, 0, screen_w),
+             std::clamp(b, 0, screen_h) };
 }
+
 
 /*
-params:
-vec3 pt - point to be projected
-vec3 cam_pos - 3d pos of cam
-vec3 cam_ori - orientation of cam (tait-bryan angles)
-vec3 dis_pos - display surface pos rel to cam pinhole
-vec3 ccd - x,y recording surface size , z distance from the recording surface to the entrance pupil 
-
-global constants: screen_w, screen_h
-*/
-glm::vec2 perspective_projection(glm::vec3 pt, glm::vec3 cam_pos, glm::vec3 cam_ori, glm::vec3 dis_pos, glm::vec3 ccd)
+float light_i(glm::vec3 pt)
 {
-	const glm::mat3x3 mat0 = { {1, 0, 0},
-							   {0, cos(cam_ori.x), sin(cam_ori.x)},
-							   {0, -sin(cam_ori.x), cos(cam_ori.x)} };
 
-	const glm::mat3x3 mat1 = { {cos(cam_ori.y), 0, -sin(cam_ori.y)},
-							   {0, 1, 0},
-							   {sin(cam_ori.y), 0, cos(cam_ori.y)} };
 
-	const glm::mat3x3 mat2 = { {cos(cam_ori.z), sin(cam_ori.z), 0},
-							   {-sin(cam_ori.z), cos(cam_ori.z), 0},
-							   {0, 0, 1} };
-
-	 const glm::vec3 d = (mat0 * mat1 * mat2 * (pt - cam_pos));
-
-	 return { (d.x * screen_w) / (d.z * ccd.x) * ccd.x,
-			  (d.y * screen_h) / (d.z * ccd.y) * ccd.z };
 }
-
+*/
 
 int main()
 {
     uint32_t* data = new uint32_t[screen_w * screen_h];
-
 
     SDL_Window* pWindow = nullptr;
     SDL_Renderer* pRenderer = nullptr;
@@ -365,6 +363,7 @@ int main()
     const int pointdensity = 200;
 	std::vector<glm::vec3> torus;
 	glm::vec3 origin = { 75, 0, 75 };
+    //glm::vec3 origin = { 125, 0, 125 };
 	std::vector<glm::vec3> circle = get_pts_on_circle(origin, 45, pointdensity);
     for (int i = 0; i <= 360; i += (360 / pointdensity))
     {
@@ -373,13 +372,16 @@ int main()
             torus.push_back(rot::pt_rot_y(point, i));
         }
     }
-
-	int x, y;
-    const glm::vec3 light_loc = { 260, 500, 290 };
-    const glm::vec3 cam_loc = { 250, 200, 250 };
-    const glm::vec3 tba = { 0.3 , -0.3 , 0 };
+    const float R1 = 1;
+    const float R2 = 2;
+    const float k2 = 13;
+    const float k1 = screen_w * k2 * 3 / (8 * (R1 + R2));
+    //const glm::vec3 light_loc = { 260, 500, 290 };
+    const glm::vec3 cam_loc = { 175, 120, 640 };
+    //const glm::vec3 cam_loc = { 82, 0, 82 };
+    const glm::vec3 tba = { 0 , 0, 0 };
     const glm::vec3 dis = { 1 , 0, 1 };
-    const glm::vec3 ccd = { 10, 10, 15 };
+    const glm::vec3 ccd = { 30, 30, 45 };
 
 	for (;;)
 	{
@@ -388,20 +390,17 @@ int main()
 			data[jj] = black;
 		}
 
-		for (glm::vec3& pt : torus)
+		for (glm::vec3 &pt : torus)
 		{
-			rot::change_pt_general_rot(&pt, 1, 0, 0);
-			
-			glm::vec2 pixel = perspective_projection(pt, cam_loc, tba, dis, ccd);
-
-			x = round(pixel.x);
-			y = round(pixel.y);
-            y = std::clamp(y, 0, screen_h-1);
-            x = std::clamp(x, 0, screen_w-1);
-            
-			data[x + (y * screen_w)] = white;
+			rot::change_pt_general_rot(&pt, 0.5, 0.333, 0);
+            pt2d p = weak_proj(pt, cam_loc, k1, k2);
+            if ((p.x > 0 && p.x < screen_w) && (p.y > 0 && p.y < screen_h))
+            {
+                data[p.x + (p.y * screen_w)] = white;
+            } 
 		}
         disp::Render(pWindow, pRenderer, pTexture, data);
+       
 	}
 
 	return 0;
